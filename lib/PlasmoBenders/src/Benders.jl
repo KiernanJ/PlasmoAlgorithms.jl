@@ -299,6 +299,7 @@ OptiNode or subgraph on `graph`. key ward arguments include the following
  - `regularize_param = 0.5` - regularization parameter; must be between 0 and 1
  - `set_graph_objectives_from_nodes` - whether to set the subgraph objectives from node objectives;
      This can be used if the user has not called `set_to_node_objectives` on all subgraphs
+ - `LBBD_cuts` - whether to add LBBD
 """
 function BendersAlgorithm(
     graph::Plasmo.OptiGraph,
@@ -356,7 +357,8 @@ function BendersAlgorithm(
     relaxed_init_cuts::Bool = false,
     slack_penalty = 1e6,
     regularize_param::Real = 0.5,
-    set_graph_objectives_from_nodes = false
+    set_graph_objectives_from_nodes = false,
+    LBBD_cuts::Bool = false # adding LBBD cuts to new 
 ) where {T <: Plasmo.AbstractOptiGraph}
 
     if !(root_object in local_subgraphs(graph))
@@ -427,6 +429,11 @@ function BendersAlgorithm(
             @warn(
                 "`feasibility_cuts` have been implemented but are still under development. " *
                 "If you experience bugs, please report them in the package's github issue tracker"
+            )
+        end
+        if LBBD_cuts
+            @warn(
+                "`LBBD_cuts` are under development."
             )
         end
         if get_regularize(optimizer)
@@ -613,7 +620,8 @@ function run_algorithm!(
         # Get the lower bound from backward pass
         time_backward_pass = @elapsed begin
             if optimizer.is_MIP
-                _backward_pass!(optimizer; strengthened = get_strengthened(optimizer))
+                _backward_pass!(optimizer; strengthened = get_strengthened(optimizer)) 
+                # KJTODO: add option for LBBD cuts here
             end
         end
 
@@ -700,12 +708,15 @@ function _forward_pass!(optimizer::BendersAlgorithm)
     ########## Solve the first node ############
     root_object = optimizer.solve_order[1]
 
-
+    print("  [FWD] Solving root subproblem (1/$(length(optimizer.solve_order)))... ")
+    flush(stdout)
     t_solve = @elapsed begin
         JuMP.optimize!(root_object)
-        
+
         root_object_feasibility = _check_termination_status(root_object, 1; add_slacks_bool=get_add_slacks(optimizer), feasibility_cuts_bool=get_feasibility_cuts(optimizer))
     end
+    @printf "done (%.2f s)\n" t_solve
+    flush(stdout)
     optimizer.time_root_problem_solve += t_solve
     
     # Get initial objective

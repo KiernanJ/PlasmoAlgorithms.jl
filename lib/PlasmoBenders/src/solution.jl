@@ -201,7 +201,11 @@ function _forward_pass_iteration!(optimizer, i, ub)
     PlasmoBenders._fix_variables(next_object, var_copies, last_primals)
 
     # Optimize the next node
+    print("  [FWD] Solving subproblem ($i/$(length(optimizer.solve_order)))... ")
+    flush(stdout)
     t_solve = @elapsed optimize!(next_object)
+    @printf "done (%.2f s)\n" t_solve
+    flush(stdout)
     optimizer.time_subproblem_solves += t_solve
 
     # Check termination status
@@ -705,4 +709,171 @@ function _add_to_upper_bound!(
         theta_val = _theta_value(optimizer, object)
         ub[1] -= theta_val
     end
+end
+
+"""
+    _add_LBBD_optimality_cuts!(optimizer::BendersAlgorithm)
+
+Add Logic-based Benders decomposition optimality cuts to each nested problem.
+"""
+function _add_LBBD_optimality_cuts!(
+    optimizer::BendersAlgorithm{T}
+) where {T <: Union{Plasmo.OptiNode, Plasmo.OptiGraph}}
+    # Loop through each object and add strengthened Benders cut
+    if get_parallelize_backward(optimizer) || get_parallelize_benders(optimizer)
+        Threads.@threads for i in 1:(length(optimizer.solve_order) - 1)
+        #for i in 1:(length(optimizer.solve_order) - 1)
+            next_object = optimizer.solve_order[i + 1]
+            if optimizer.feasibility_map[next_object]
+                _solve_for_LBBD_optimality_cuts(optimizer, i)
+            end
+        end
+    else
+        for i in 1:(length(optimizer.solve_order) - 1)
+            next_object = optimizer.solve_order[i + 1]
+            if optimizer.feasibility_map[next_object]
+                _solve_for_LBBD_optimality_cuts(optimizer, i)
+            end
+        end
+    end
+
+    for i in 1:(length(optimizer.solve_order))
+        last_object = optimizer.solve_order[i]
+        next_objects = optimizer.solve_order_dict[last_object]
+
+        if length(next_objects) > 0
+            _add_LBBD_optimality_cut_to_object!(optimizer, last_object, next_objects)
+        end
+    end
+end
+
+
+function _solve_for_LBBD_optimality_cuts(optimizer, i)
+    next_object = optimizer.solve_order[i + 1]
+
+    comp_vars = optimizer.comp_vars[next_object]
+    var_copy_map = optimizer.var_copy_map[next_object]
+
+    # Loop through each complicating variable and set them
+    # Ensure that each complicating variable copy matches the original variable
+    for (j, var) in enumerate(comp_vars)
+        var_copy = var_copy_map[var]
+
+        if JuMP.is_binary(var)
+            JuMP.set_binary(var_copy)
+        elseif JuMP.is_integer(var)
+            JuMP.set_integer(var_copy)
+        end
+
+        if JuMP.has_lower_bound(var)
+            JuMP.set_lower_bound(var_copy, JuMP.lower_bound(var))
+        end
+        if JuMP.has_upper_bound(var)
+            JuMP.set_upper_bound(var_copy, JuMP.upper_bound(var))
+        end
+    end
+
+    _update_objective_and_optimize(optimizer, next_object)
+
+    # Unset binary/integer complicating variable copies
+    # These get fixed, so they do not need to be integer
+    for (j, var) in enumerate(comp_vars)
+        var_copy = var_copy_map[var]
+
+        if JuMP.is_binary(var)
+            JuMP.unset_binary(var_copy)
+        elseif JuMP.is_integer(var)
+            JuMP.unset_integer(var_copy)
+        end
+    end
+end
+
+
+"""
+    _add_strengthened_cut_to_object!(optimizer, last_object, next_objects)
+
+Add cuts to a given object
+"""
+function _add_LBBD_optimality_cut_to_object!(optimizer::BendersAlgorithm, last_object::G, next_objects::Vector{G}) where {G <: Plasmo.AbstractOptiGraph}
+    V = Plasmo.variable_type(last_object)
+    agg_rhs_expr = GenericAffExpr{Float64, V}()
+    agg_rhs_expr_LR = GenericAffExpr{Float64, V}()
+
+    for (j, object) in enumerate(next_objects)
+        if optimizer.feasibility_map[object]
+            rhs_expr = GenericAffExpr{Float64, V}()
+            rhs_expr_LR = GenericAffExpr{Float64, V}()
+
+            # Complicating variables are on previous object
+            comp_vars = optimizer.comp_vars[object]
+
+            # Phi is the solution of the previous object
+            phis = optimizer.phis[object]
+            phis_LR = optimizer.phis_LR[object]
+
+            next_phi = phis[length(phis)]
+            next_phi_LR = phis_LR[length(phis_LR)]
+
+            # Values of the complicating variables at last iteration
+            primal_iters = optimizer.primal_iters[object]
+            last_primals = primal_iters[:, size(primal_iters, 2)]
+
+            # Dual variables come from the linking of complicating variables to the next object
+            dual_iters = optimizer.dual_iters[object]
+            next_duals = dual_iters[:, size(dual_iters, 2)]
+
+            add_to_expression!(rhs_expr, next_phi)
+            for k in 1:length(comp_vars)
+                add_to_expression!(rhs_expr, next_duals[k] * (comp_vars[k] - last_primals[k]))
+            end
+            add_to_expression!(rhs_expr_LR, next_phi_LR)
+            for k in 1:length(comp_vars)
+                add_to_expression!(rhs_expr_LR, next_duals[k] * (comp_vars[k] - last_primals[k]))
+            end
+            if get_multicut(optimizer)
+                theta_var = _get_theta(optimizer, last_object, j)
+                if rhs_expr.constant > rhs_expr_LR.constant
+                    _add_cut_constraint!(optimizer, last_object, theta_var, rhs_expr)
+                else
+                    _add_cut_constraint!(optimizer, last_object, theta_var, rhs_expr_LR)
+                end
+            else
+                add_to_expression!(agg_rhs_expr, rhs_expr)
+                add_to_expression!(agg_rhs_expr_LR, rhs_expr_LR)
+            end
+        else
+            rhs_expr = GenericAffExpr{Float64, Plasmo.NodeVariableRef}()
+            # Complicating variables are on previous object
+            comp_vars = optimizer.comp_vars[object]
+
+            # Phi is the solution of the previous object
+            phis = optimizer.phis[object]
+            next_phi = phis[length(phis)]
+
+            # Values of the complicating variables at last iteration
+            primal_iters = optimizer.primal_iters[object]
+            last_primals = primal_iters[:, size(primal_iters, 2)]
+
+            # Dual variables come from the linking of complicating variables to the next object
+            dual_iters = optimizer.dual_iters[object]
+            next_duals = dual_iters[:, size(dual_iters, 2)]
+            add_to_expression!(rhs_expr, next_phi)
+            for k in 1:length(comp_vars)
+                add_to_expression!(rhs_expr, next_duals[k] * (comp_vars[k] - last_primals[k]))
+            end
+            theta_var = _get_theta(optimizer, last_object, j)
+            _add_feasibility_cut_constraint!(optimizer, last_object, rhs_expr)
+        end
+    end
+
+    if !(get_multicut(optimizer)) && !(get_feasibility_cuts(optimizer))
+        theta_vars = _get_theta(optimizer, last_object)
+        theta_expr = sum(theta_vars[k] for k in 1:length(theta_vars))
+        if agg_rhs_expr.constant > agg_rhs_expr_LR.constant
+            _add_cut_constraint!(optimizer, last_object, theta_expr, agg_rhs_expr)
+        else
+            _add_cut_constraint!(optimizer, last_object, theta_expr, agg_rhs_expr_LR)
+        end
+    end
+
 end
