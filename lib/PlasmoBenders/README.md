@@ -16,6 +16,8 @@ Pkg.add("PlasmoBenders")
 
 ### Overview
 
+Test commit
+
 [Benders decomposition](https://en.wikipedia.org/wiki/Benders_decomposition) (BD) is a decomposition approach that breaks problems into a master problem and a subproblem(s) and is typically applied to linear and mixed integer linear programs. BD is an iterative algorithm that can be useful for problems where there are a set of complicating variables (in the master problem) that, once fixed, make the subproblem easier to solve. An iteration of BD generally includes 1) solving the master problem, 2) passing the solution of the master problem to the subproblem, 3) solving the subproblem with the master problem solution, and 4) passing primal and dual information from the subproblem to the master problem and forming cutting planes on the master problem. PlasmoBenders applies this approach to graph-based problems where each subgraph of an OptiGraph is the master problem or a subproblem. PD is applied to the graph based on the user-defined subproblems. 
 
 Nested Benders Decomposition (NBD; also called [dual dynamic programming](https://doi.org/10.1016/j.compchemeng.2021.107265)) uses similar ideas to BD but can have a sequence of subproblems (i.e., not all subproblems are connected to the original master problem, forming a nested structure). NBD can be applied to graphs with a tree structure, and NBD is likewise implemented in PlasmoBenders.
