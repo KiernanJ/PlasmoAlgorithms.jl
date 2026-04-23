@@ -887,6 +887,16 @@ function _add_integer_optimality_cuts!(
     optimizer::BendersAlgorithm{T}
 ) where {T <: Union{Plasmo.OptiNode, Plasmo.OptiGraph}}
 
+    V = Plasmo.variable_type(optimizer.graph)
+    # Loop through each object; compile information and add integer opt cut
+    for i in 1:(length(optimizer.solve_order))
+        last_object = optimizer.solve_order[i]
+        next_objects = optimizer.solve_order_dict[last_object]
+
+        if length(next_objects) > 0 
+            _add_integer_optimality_cut_to_object!(optimizer, last_object, next_objects)            
+        end
+    end
 end
 
 
@@ -895,6 +905,50 @@ function _solve_for_integer_optimality_cuts(optimizer, i)
 end
 
 
-function _add_integer_optimality_cut_to_object!(optimizer::BendersAlgorithm, last_object::G, next_objects::Vector{G}) where {G <: Plasmo.AbstractOptiGraph}
+function _add_integer_optimality_cut_to_object!(
+    optimizer::BendersAlgorithm, 
+    last_object::G, 
+    next_objects::Vector{G}) where {G <: Plasmo.AbstractOptiGraph}
 
+    V = Plasmo.variable_type(last_object)
+    agg_rhs_expr = GenericAffExpr{Float64, V}()
+
+    for (j, object) in enumerate(next_objects)
+        rhs_expr = GenericAffExpr{Float64, V}()
+        # Complicating variables are on previous object
+        comp_vars = optimizer.comp_vars[object]
+
+        # Phi is the solution of the parent object
+        phis = optimizer.phis[object]
+        next_phi = phis[length(phis)]
+
+        # Values of the complicating variables at last iteration
+        primal_iters = optimizer.primal_iters[object]
+        last_primals = primal_iters[:, size(primal_iters, 2)]
+
+        # Dual variables come from the linking of complicating variables to the next object
+        dual_iters = optimizer.dual_iters[object]
+        next_duals = dual_iters[:, size(dual_iters, 2)]
+        add_to_expression!(rhs_expr, next_phi)
+        for k in 1:length(comp_vars)
+            add_to_expression!(rhs_expr, next_duals[k] * (comp_vars[k] - last_primals[k]))
+        end
+
+        if get_multicut(optimizer)
+            theta_var = _get_theta(optimizer, last_object, j)
+            if optimizer.feasibility_map[object]
+                _add_cut_constraint!(optimizer, last_object, theta_var, rhs_expr)
+            else
+                _add_feasibility_cut_constraint!(optimizer, last_object, rhs_expr)
+            end
+        else
+            add_to_expression!(agg_rhs_expr, rhs_expr)
+        end
+
+        if !(get_multicut(optimizer))
+            theta_vars = _get_theta(optimizer, last_object)
+            theta_expr = sum(theta_vars[k] for k in 1:length(theta_vars))
+            _add_cut_constraint!(optimizer, last_object, theta_expr, agg_rhs_expr)
+        end
+    end
 end
