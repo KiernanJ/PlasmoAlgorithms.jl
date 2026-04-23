@@ -877,3 +877,24 @@ function _add_LBBD_optimality_cut_to_object!(optimizer::BendersAlgorithm, last_o
     end
 
 end
+
+"""
+    _add_integer_optimality_cuts!(optimizer::BendersAlgorithm)
+
+Add integer optimality cuts to each nested problem.
+"""
+function _add_integer_optimality_cuts!(
+    optimizer::BendersAlgorithm{T}
+) where {T <: Union{Plasmo.OptiNode, Plasmo.OptiGraph}}
+
+end
+
+
+function _solve_for_integer_optimality_cuts(optimizer, i)
+
+end
+
+
+function _add_integer_optimality_cut_to_object!(optimizer::BendersAlgorithm, last_object::G, next_objects::Vector{G}) where {G <: Plasmo.AbstractOptiGraph}
+
+end

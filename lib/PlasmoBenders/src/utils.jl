@@ -409,7 +409,8 @@ _options_bool_fields = [
     :add_slacks,
     :warm_start,
     :relaxed_init_cuts,
-    :LBBD_cuts
+    :LBBD_cuts,
+    :integer_optimality_cuts
 ]
 
 _options_real_fields = [

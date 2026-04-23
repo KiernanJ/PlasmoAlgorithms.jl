@@ -44,6 +44,7 @@ mutable struct BendersOptions <: AbstractPBOptions
     warm_start::Bool
     relaxed_init_cuts::Bool
     LBBD_cuts::Bool
+    integer_optimality_cuts::Bool
 
     slack_penalty::Real
     regularize_param::Real
@@ -63,6 +64,7 @@ mutable struct BendersOptions <: AbstractPBOptions
         options.warm_start = true
         options.relaxed_init_cuts = false
         options.LBBD_cuts = false
+        options.integer_optimality_cuts = false
 
         options.slack_penalty = 1.0e6
         options.regularize_param = 0.5
@@ -302,6 +304,7 @@ OptiNode or subgraph on `graph`. key ward arguments include the following
  - `set_graph_objectives_from_nodes` - whether to set the subgraph objectives from node objectives;
      This can be used if the user has not called `set_to_node_objectives` on all subgraphs
  - `LBBD_cuts` - whether to add LBBD
+ - `integer_optimality_cuts` - whether to add the integer optimality cuts (see https://doi.org/10.1016/0167-6377(93)90002-X)
 """
 function BendersAlgorithm(
     graph::Plasmo.OptiGraph,
@@ -360,7 +363,8 @@ function BendersAlgorithm(
     slack_penalty = 1e6,
     regularize_param::Real = 0.5,
     set_graph_objectives_from_nodes = false,
-    LBBD_cuts::Bool = false # adding LBBD cuts to new 
+    LBBD_cuts::Bool = false,
+    integer_optimality_cuts::Bool = false
 ) where {T <: Plasmo.AbstractOptiGraph}
 
     if !(root_object in local_subgraphs(graph))
@@ -395,7 +399,8 @@ function BendersAlgorithm(
 
         set_strengthened!(optimizer, strengthened)
 
-        set_LBBD_cuts!(optimizer, LBBD_cuts) # test setter
+        set_LBBD_cuts!(optimizer, LBBD_cuts)
+        set_integer_optimality_cuts!(optimizer, integer_optimality_cuts)
 
         set_multicut!(optimizer, multicut)
         set_feasibility_cuts!(optimizer, feasibility_cuts)
@@ -439,6 +444,11 @@ function BendersAlgorithm(
         if LBBD_cuts
             @warn(
                 "`LBBD_cuts` are under development."
+            )
+        end
+        if integer_optimality_cuts
+            @warn(
+                "`integer_optimality_cuts` are under development."
             )
         end
         if get_regularize(optimizer)
@@ -625,7 +635,7 @@ function run_algorithm!(
         # Get the lower bound from backward pass
         time_backward_pass = @elapsed begin
             if optimizer.is_MIP
-                _backward_pass!(optimizer; strengthened = get_strengthened(optimizer), LBBD_cuts = get_LBBD_cuts(optimizer))
+                _backward_pass!(optimizer; strengthened = get_strengthened(optimizer), LBBD_cuts = get_LBBD_cuts(optimizer), integer_optimality_cuts = get_integer_optimality_cuts(optimizer))
             end
         end
 
@@ -775,9 +785,10 @@ and integer variables are relaxed and the problem is solved to get the dual and 
 values for producing Benders cuts. If `strengthened = true`, the stengthened cuts are ALSO
 added using the approach of Zou et al. https://doi.org/10.1007/s10107-018-1249-5.
 """
-function _backward_pass!(optimizer::BendersAlgorithm; 
+function _backward_pass!(optimizer::BendersAlgorithm;
     strengthened::Bool = false,
-    LBBD_cuts::Bool = false)
+    LBBD_cuts::Bool = false,
+    integer_optimality_cuts::Bool = false)
 
     len_solve_order = length(optimizer.solve_order)
 
@@ -792,8 +803,10 @@ function _backward_pass!(optimizer::BendersAlgorithm;
     if !(get_sequential_backward_pass(optimizer))
         if get_strengthened(optimizer)
             _add_strengthened_cuts!(optimizer)
-        elseif LBBD_cuts
+        elseif get_LBBD_cuts(optimizer)
             _add_LBBD_optimality_cuts!(optimizer)
+        elseif get_integer_optimality_cuts(optimizer)
+            _add_integer_optimality_cuts!(optimizer)
         else
             _add_Benders_cuts!(optimizer)
         end
