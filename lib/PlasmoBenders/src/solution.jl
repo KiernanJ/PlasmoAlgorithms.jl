@@ -374,7 +374,6 @@ function _backward_pass_iteration!(optimizer::BendersAlgorithm, i)
 
         # Unfix primal solutions
         PlasmoBenders._unfix_variables(object, var_copies)
-
         _reset_integrality(optimizer, object)
     end
 
