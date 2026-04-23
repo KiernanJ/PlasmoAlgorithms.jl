@@ -338,10 +338,14 @@ function _backward_pass_iteration!(optimizer::BendersAlgorithm, i)
         var_copies = [var_copy_map[var] for var in comp_vars]
         PlasmoBenders._fix_variables(object, var_copies, last_primals)
 
+
+        print("  [BWD] Solving subproblem ($i/$(length(optimizer.solve_order)))... ")
+    
         # Optimize the next node
         t_solve = @elapsed optimize!(object)
         optimizer.time_subproblem_solves += t_solve
 
+        @printf "done (%.2f s)\n" t_solve
         # Check termination status
         object_termination_status = _check_termination_status(object, i; add_slacks_bool=get_add_slacks(optimizer), feasibility_cuts_bool=get_feasibility_cuts(optimizer))
 

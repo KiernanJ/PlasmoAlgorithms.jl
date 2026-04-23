@@ -791,7 +791,7 @@ function _backward_pass!(optimizer::BendersAlgorithm;
     integer_optimality_cuts::Bool = false)
 
     len_solve_order = length(optimizer.solve_order)
-
+    
     # Perform backward pass in parallel
     if get_parallelize_backward(optimizer) || get_parallelize_benders(optimizer)
         _optimize_in_backward_pass_multithread!(optimizer)
