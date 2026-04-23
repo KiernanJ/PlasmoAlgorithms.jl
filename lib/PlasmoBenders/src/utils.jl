@@ -408,7 +408,8 @@ _options_bool_fields = [
     :parallelize_backward,
     :add_slacks,
     :warm_start,
-    :relaxed_init_cuts
+    :relaxed_init_cuts,
+    :LBBD_cuts
 ]
 
 _options_real_fields = [

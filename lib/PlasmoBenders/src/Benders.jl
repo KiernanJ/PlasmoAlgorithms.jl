@@ -43,6 +43,7 @@ mutable struct BendersOptions <: AbstractPBOptions
     add_slacks::Bool
     warm_start::Bool
     relaxed_init_cuts::Bool
+    LBBD_cuts::Bool
 
     slack_penalty::Real
     regularize_param::Real
@@ -61,6 +62,7 @@ mutable struct BendersOptions <: AbstractPBOptions
         options.add_slacks = false
         options.warm_start = true
         options.relaxed_init_cuts = false
+        options.LBBD_cuts = false
 
         options.slack_penalty = 1.0e6
         options.regularize_param = 0.5
@@ -392,6 +394,9 @@ function BendersAlgorithm(
         optimizer.graph = graph
 
         set_strengthened!(optimizer, strengthened)
+
+        set_LBBD_cuts!(optimizer, LBBD_cuts) # test setter
+
         set_multicut!(optimizer, multicut)
         set_feasibility_cuts!(optimizer, feasibility_cuts)
         set_regularize!(optimizer, regularize)
@@ -620,8 +625,7 @@ function run_algorithm!(
         # Get the lower bound from backward pass
         time_backward_pass = @elapsed begin
             if optimizer.is_MIP
-                _backward_pass!(optimizer; strengthened = get_strengthened(optimizer)) 
-                # KJTODO: add option for LBBD cuts here
+                _backward_pass!(optimizer; strengthened = get_strengthened(optimizer), LBBD_cuts = get_LBBD_cuts(optimizer))
             end
         end
 
@@ -771,7 +775,9 @@ and integer variables are relaxed and the problem is solved to get the dual and 
 values for producing Benders cuts. If `strengthened = true`, the stengthened cuts are ALSO
 added using the approach of Zou et al. https://doi.org/10.1007/s10107-018-1249-5.
 """
-function _backward_pass!(optimizer::BendersAlgorithm; strengthened::Bool = false)
+function _backward_pass!(optimizer::BendersAlgorithm; 
+    strengthened::Bool = false,
+    LBBD_cuts::Bool = false)
 
     len_solve_order = length(optimizer.solve_order)
 
@@ -786,6 +792,8 @@ function _backward_pass!(optimizer::BendersAlgorithm; strengthened::Bool = false
     if !(get_sequential_backward_pass(optimizer))
         if get_strengthened(optimizer)
             _add_strengthened_cuts!(optimizer)
+        elseif LBBD_cuts
+            _add_LBBD_optimality_cuts!(optimizer)
         else
             _add_Benders_cuts!(optimizer)
         end
